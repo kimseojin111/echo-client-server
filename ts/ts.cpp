@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <vector> 
+#include <set>
 #ifdef __linux__
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -16,6 +18,9 @@
 void perror(const char* msg) { fprintf(stderr, "%s %ld\n", msg, GetLastError()); }
 #endif // WIN32
 
+
+std::set<int> sd_vector; 
+
 void usage() {
 	printf("syntax: ts [-e] <port>\n");
 	printf("  -e : echo\n");
@@ -24,6 +29,7 @@ void usage() {
 
 struct Param {
 	bool echo{false};
+	bool broadcast{false};
 	uint16_t port{0};
 
 	bool parse(int argc, char* argv[]) {
@@ -32,11 +38,17 @@ struct Param {
 				echo = true;
 				continue;
 			}
-			port = atoi(argv[i++]);
+			else if(strcmp(argv[i],"-b") == 0) {
+				broadcast = true; 
+				continue; 
+			}
+			else port = atoi(argv[i]);
 		}
 		return port != 0;
 	}
 } param;
+
+
 
 void recvThread(int sd) {
 	printf("connected\n");
@@ -52,7 +64,17 @@ void recvThread(int sd) {
 		buf[res] = '\0';
 		printf("%s", buf);
 		fflush(stdout);
-		if (param.echo) {
+		if (param.broadcast){
+			for(auto &i: sd_vector){
+				res = ::send(i, buf, res, 0);
+				if(res==0||res==-1){
+					fprintf(stderr, "send return %ld", res);
+					perror(" ");
+					break;
+				}
+			} 
+		}
+		else if (param.echo) {
 			res = ::send(sd, buf, res, 0);
 			if (res == 0 || res == -1) {
 				fprintf(stderr, "send return %ld", res);
@@ -62,6 +84,7 @@ void recvThread(int sd) {
 		}
 	}
 	printf("disconnected\n");
+	sd_vector.erase(sd);
 	::close(sd);
 }
 
@@ -117,6 +140,7 @@ int main(int argc, char* argv[]) {
 			perror("accept");
 			break;
 		}
+		sd_vector.insert(cli_sd);
 		std::thread* t = new std::thread(recvThread, cli_sd);
 		t->detach();
 	}
